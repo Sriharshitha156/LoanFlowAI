@@ -41,6 +41,15 @@ class DecisionRequest(BaseModel):
 def health_check():
     return {"status": "ok"}
 
+@app.get("/applications")
+def list_applications():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, applicant_name, amount_requested, status FROM application")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 @app.get("/applications/{application_id}/case-file")
 def get_case_file(application_id: str):
     conn = get_db()

@@ -9,10 +9,12 @@ import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.main import app, get_db
+from scripts.setup_db import setup_database
 
 class TestAPIEndpoints(unittest.TestCase):
     
     def setUp(self):
+        setup_database()
         self.client = TestClient(app)
         self.db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "loanflow.db"))
         
@@ -103,7 +105,7 @@ class TestAPIEndpoints(unittest.TestCase):
         cursor.execute("SELECT * FROM audit_log WHERE application_id = 'app_clean_approve_001' AND step_name = 'underwriter_decision'")
         log_row = cursor.fetchone()
         self.assertIsNotNone(log_row)
-        self.assertEqual(log_row["actor"], "underwriter_42")
+        self.assertEqual(log_row["actor"], "HUMAN")
         
         conn.close()
 

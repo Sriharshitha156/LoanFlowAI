@@ -120,7 +120,7 @@ def get_case_file(application_id: str):
             
         # Compute scores if missing
         if not policy_score:
-            computed_scores = score_application(financial_payload)
+            computed_scores = score_application(financial_payload, application_id=application_id, conn=conn)
             score_id = f"score_{uuid.uuid4().hex[:8]}"
             cursor.execute(
                 """
@@ -131,10 +131,29 @@ def get_case_file(application_id: str):
             )
             cursor.execute("SELECT * FROM policy_score WHERE id = ?", (score_id,))
             policy_score = dict(cursor.fetchone())
+        else:
+            # If policy_score exists but is not logged yet, write an audit log row for trace completeness
+            score_payload = {
+                "dti_score": round(policy_score["debt_to_income"] * 100.0, 2), # approx scale
+                "credit_score": float(policy_score["credit_history_score"]),
+                "income_stability_score": float(policy_score["income_stability_score"]),
+                "composite_score": float(policy_score["composite_score"]),
+                "verdict": "APPROVE" if policy_score["composite_score"] >= 80.0 else ("REFER" if policy_score["composite_score"] >= 60.0 else "DECLINE")
+            }
+            cursor.execute("SELECT 1 FROM audit_log WHERE application_id = ? AND step_name = 'policy_scoring'", (application_id,))
+            if not cursor.fetchone():
+                log_id = f"log_{uuid.uuid4().hex[:8]}"
+                cursor.execute(
+                    """
+                    INSERT INTO audit_log (id, application_id, step_name, actor, payload, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (log_id, application_id, "policy_scoring", "SYSTEM", json.dumps(score_payload), datetime.utcnow().isoformat() + "Z")
+                )
             
         # Compute fairness if missing
         if not fairness_check:
-            computed_fairness = run_fairness_check(financial_payload)
+            computed_fairness = run_fairness_check(financial_payload, application_id=application_id, conn=conn)
             fairness_id = f"fc_{uuid.uuid4().hex[:8]}"
             cursor.execute(
                 """
@@ -150,7 +169,7 @@ def get_case_file(application_id: str):
         if not recommendation:
             computed_scores = score_application(financial_payload)
             computed_fairness = run_fairness_check(financial_payload)
-            computed_rec = generate_recommendation(computed_scores, computed_fairness)
+            computed_rec = generate_recommendation(computed_scores, computed_fairness, application_id=application_id, conn=conn)
             rec_id = f"rec_{uuid.uuid4().hex[:8]}"
             cursor.execute(
                 """
@@ -237,7 +256,7 @@ def post_decision(application_id: str, req: DecisionRequest):
             (application_id,)
         )
         
-        # Insert AuditLog
+        # Insert AuditLog with actor as HUMAN
         payload_data = {
             "underwriter_id": req.underwriter_id,
             "final_verdict": req.final_verdict,
@@ -249,7 +268,7 @@ def post_decision(application_id: str, req: DecisionRequest):
             INSERT INTO audit_log (id, application_id, step_name, actor, payload, timestamp)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (log_id, application_id, "underwriter_decision", req.underwriter_id, json.dumps(payload_data), decided_at)
+            (log_id, application_id, "underwriter_decision", "HUMAN", json.dumps(payload_data), decided_at)
         )
         
         conn.commit()
@@ -260,3 +279,33 @@ def post_decision(application_id: str, req: DecisionRequest):
         
     conn.close()
     return {"status": "success", "decision_id": decision_id}
+
+@app.get("/applications/{application_id}/audit-trail")
+def get_audit_trail(application_id: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # Verify application exists
+    cursor.execute("SELECT 1 FROM application WHERE id = ?", (application_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    cursor.execute(
+        "SELECT * FROM audit_log WHERE application_id = ? ORDER BY timestamp ASC",
+        (application_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    trail = []
+    for r in rows:
+        item = dict(r)
+        if item.get("payload"):
+            try:
+                item["payload"] = json.loads(item["payload"])
+            except Exception:
+                pass
+        trail.append(item)
+        
+    return trail

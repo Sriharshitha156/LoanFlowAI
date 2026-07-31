@@ -3,7 +3,36 @@ import json
 import urllib.request
 import urllib.error
 
-def generate_recommendation(score_breakdown: dict, fairness_check: dict) -> dict:
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "loanflow.db"))
+
+def log_audit(application_id: str, step_name: str, actor: str, payload: dict, conn=None):
+    if not application_id:
+        return
+    import sqlite3
+    import uuid
+    from datetime import datetime
+    
+    log_id = f"log_{uuid.uuid4().hex[:8]}"
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    query = """
+        INSERT INTO audit_log (id, application_id, step_name, actor, payload, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """
+    
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute(query, (log_id, application_id, step_name, actor, json.dumps(payload), timestamp))
+    else:
+        try:
+            conn_new = sqlite3.connect(DB_PATH)
+            cursor = conn_new.cursor()
+            cursor.execute(query, (log_id, application_id, step_name, actor, json.dumps(payload), timestamp))
+            conn_new.commit()
+            conn_new.close()
+        except Exception as e:
+            print(f"Warning: Failed to write audit log for step {step_name}: {str(e)}")
+
+def generate_recommendation(score_breakdown: dict, fairness_check: dict, application_id: str = None, conn=None) -> dict:
     """
     Calls Claude (or fallback API/mock) to generate a structured reasoning explanation.
     """
@@ -86,6 +115,7 @@ def generate_recommendation(score_breakdown: dict, fairness_check: dict) -> dict
         response_text = mock_llm_response(verdict, composite, dti_score, credit_score, income_stability, fairness_result)
         
     # Clean and parse response text
+    rec_result = None
     try:
         clean_text = response_text.strip()
         if clean_text.startswith("```"):
@@ -94,13 +124,19 @@ def generate_recommendation(score_breakdown: dict, fairness_check: dict) -> dict
                 clean_text = "\n".join(lines[1:-1])
             else:
                 clean_text = "\n".join(lines[1:-1])
-        return json.loads(clean_text)
+        rec_result = json.loads(clean_text)
     except Exception:
-        return {
+        rec_result = {
             "verdict": verdict,
             "reasoning_text": f"Decision processed for composite score {composite}.",
             "cited_rules": ["General Score Assessment"]
         }
+        
+    # Write audit log if application_id is provided
+    if application_id:
+        log_audit(application_id, "recommendation_generation", "AGENT", rec_result, conn=conn)
+        
+    return rec_result
 
 def mock_llm_response(verdict: str, composite: float, dti: float, credit: float, income: float, fairness: str) -> str:
     rules = []

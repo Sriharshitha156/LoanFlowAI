@@ -2,12 +2,40 @@ import json
 import os
 
 CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "scoring_config.json"))
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "loanflow.db"))
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_PATH):
         raise FileNotFoundError(f"Scoring config file not found at {CONFIG_PATH}")
     with open(CONFIG_PATH, "r") as f:
         return json.load(f)
+
+def log_audit(application_id: str, step_name: str, actor: str, payload: dict, conn=None):
+    if not application_id:
+        return
+    import sqlite3
+    import uuid
+    from datetime import datetime
+    
+    log_id = f"log_{uuid.uuid4().hex[:8]}"
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    query = """
+        INSERT INTO audit_log (id, application_id, step_name, actor, payload, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """
+    
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute(query, (log_id, application_id, step_name, actor, json.dumps(payload), timestamp))
+    else:
+        try:
+            conn_new = sqlite3.connect(DB_PATH)
+            cursor = conn_new.cursor()
+            cursor.execute(query, (log_id, application_id, step_name, actor, json.dumps(payload), timestamp))
+            conn_new.commit()
+            conn_new.close()
+        except Exception as e:
+            print(f"Warning: Failed to write audit log for step {step_name}: {str(e)}")
 
 def calculate_dti_score(dti: float) -> float:
     """
@@ -58,7 +86,7 @@ def calculate_credit_score(credit_history_score: int, thin_file_score: float) ->
     else:
         return 10.0
 
-def score_application(financial_data: dict) -> dict:
+def score_application(financial_data: dict, application_id: str = None, conn=None) -> dict:
     """
     Computes scores for an application:
     - dti_score: normalized score for DTI (0-100)
@@ -66,14 +94,6 @@ def score_application(financial_data: dict) -> dict:
     - income_stability_score: direct score out of 100
     - composite_score: weighted average of the three component scores
     - verdict: 'APPROVE', 'REFER', or 'DECLINE'
-    
-    Inputs in financial_data:
-    - dti: float (debt to income ratio)
-    - credit_score: int (credit score, or 0/None for thin-file)
-    - income_stability: float (stability score out of 100)
-    - documents_verified: bool (default True, False if any doc is unverified/missing)
-    - zipcode: str (optional, demographic field)
-    - age: int (optional, demographic field)
     """
     config = load_config()
     weights = config["weights"]
@@ -126,10 +146,16 @@ def score_application(financial_data: dict) -> dict:
     else:
         verdict = "DECLINE"
         
-    return {
+    result = {
         "dti_score": round(s_dti, 2),
         "credit_score": round(s_credit, 2),
         "income_stability_score": round(s_income, 2),
         "composite_score": round(composite, 2),
         "verdict": verdict
     }
+    
+    # Audit log if application_id is provided
+    if application_id:
+        log_audit(application_id, "policy_scoring", "SYSTEM", result, conn=conn)
+        
+    return result

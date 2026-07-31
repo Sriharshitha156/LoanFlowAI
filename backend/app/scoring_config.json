@@ -1,0 +1,13 @@
+{
+  "weights": {
+    "dti": 0.35,
+    "credit": 0.40,
+    "income": 0.25
+  },
+  "thresholds": {
+    "approve": 80.0,
+    "refer": 60.0
+  },
+  "thin_file_score": 50.0,
+  "missing_doc_penalty_cap": 59.0
+}

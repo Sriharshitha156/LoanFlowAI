@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+@theme {
+  --font-serif: "Fraunces", serif;
+  --font-sans: "Inter", sans-serif;
+  --color-primary-navy: #0B1B3A;
+  --color-accent-teal: #0F766E;
+  --color-accent-amber: #D97706;
+  --color-accent-decline: #B91C1C;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #F8F9FA;
+  color: #0B1B3A;
+}
+
+h1, h2, h3, h4, .font-heading {
+  font-family: var(--font-serif);
+}

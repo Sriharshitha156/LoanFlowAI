@@ -1,0 +1,17 @@
+# Python virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache / compile files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite Database
+# We exclude database state or logs if any, but since the empty loanflow.db is requested as a placeholder to be committed, we don't ignore it, or we ignore other .db files.
+# Let's keep loanflow.db untracked/tracked if required.
+*.db-journal
+*.db-shm
+*.db-wal

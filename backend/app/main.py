@@ -318,3 +318,88 @@ def get_audit_trail(application_id: str):
         trail.append(item)
         
     return trail
+
+@app.get("/dashboard/stats")
+def get_dashboard_stats():
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # 1. Turnaround time
+    cursor.execute(
+        """
+        SELECT a.submitted_at, d.decided_at 
+        FROM application a 
+        JOIN decision d ON a.id = d.application_id
+        """
+    )
+    rows = cursor.fetchall()
+    durations = []
+    for sub_at, dec_at in rows:
+        try:
+            t_sub = datetime.fromisoformat(sub_at.replace("Z", "+00:00"))
+            t_dec = datetime.fromisoformat(dec_at.replace("Z", "+00:00"))
+            durations.append((t_dec - t_sub).total_seconds())
+        except Exception:
+            pass
+            
+    avg_turnaround_mins = (sum(durations) / len(durations)) / 60.0 if durations else 0.0
+    avg_turnaround_mins = round(avg_turnaround_mins, 1)
+    
+    # 2. Straight-through approval rate
+    cursor.execute("SELECT COUNT(*) FROM decision")
+    total_decisions = cursor.fetchone()[0]
+    
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM decision 
+        WHERE final_verdict = 'APPROVE' AND overrode_agent = 0
+        """
+    )
+    straight_through = cursor.fetchone()[0]
+    
+    st_rate = (straight_through / total_decisions) * 100.0 if total_decisions > 0 else 0.0
+    st_rate = round(st_rate, 1)
+    
+    # 3. Audit-pass rate
+    cursor.execute("SELECT COUNT(*) FROM fairness_check")
+    total_checks = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM fairness_check WHERE result = 'PASS'")
+    pass_checks = cursor.fetchone()[0]
+    
+    pass_rate = (pass_checks / total_checks) * 100.0 if total_checks > 0 else 100.0
+    pass_rate = round(pass_rate, 1)
+    
+    conn.close()
+    return {
+        "avg_turnaround_mins": avg_turnaround_mins,
+        "straight_through_rate": st_rate,
+        "audit_pass_rate": pass_rate
+    }
+
+@app.get("/audit-logs")
+def get_all_audit_logs(application_id: str = None):
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    if application_id:
+        cursor.execute(
+            "SELECT * FROM audit_log WHERE application_id = ? ORDER BY timestamp DESC",
+            (application_id,)
+        )
+    else:
+        cursor.execute("SELECT * FROM audit_log ORDER BY timestamp DESC")
+        
+    rows = cursor.fetchall()
+    conn.close()
+    
+    logs = []
+    for r in rows:
+        item = dict(r)
+        if item.get("payload"):
+            try:
+                item["payload"] = json.loads(item["payload"])
+            except Exception:
+                pass
+        logs.append(item)
+    return logs

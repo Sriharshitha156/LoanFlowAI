@@ -9,5 +9,11 @@
     "refer": 60.0
   },
   "thin_file_score": 50.0,
-  "missing_doc_penalty_cap": 59.0
+  "missing_doc_penalty_cap": 59.0,
+  "bias_rules": {
+    "redlined_zipcodes": ["90001", "90002"],
+    "zipcode_penalty": 10.0,
+    "young_age_threshold": 25,
+    "young_age_penalty": 5.0
+  }
 }

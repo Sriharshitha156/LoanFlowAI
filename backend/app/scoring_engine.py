@@ -72,12 +72,15 @@ def score_application(financial_data: dict) -> dict:
     - credit_score: int (credit score, or 0/None for thin-file)
     - income_stability: float (stability score out of 100)
     - documents_verified: bool (default True, False if any doc is unverified/missing)
+    - zipcode: str (optional, demographic field)
+    - age: int (optional, demographic field)
     """
     config = load_config()
     weights = config["weights"]
     thresholds = config["thresholds"]
     thin_file_score = config["thin_file_score"]
     missing_doc_penalty_cap = config["missing_doc_penalty_cap"]
+    bias_rules = config.get("bias_rules", {})
     
     # Safely get fields
     dti = float(financial_data.get("dti", 0.0))
@@ -97,6 +100,20 @@ def score_application(financial_data: dict) -> dict:
         (s_income * weights["income"])
     )
     
+    # Apply bias rules (only if demographic fields are present in the input data)
+    if "zipcode" in financial_data:
+        zipcode = str(financial_data["zipcode"])
+        if zipcode in bias_rules.get("redlined_zipcodes", []):
+            composite -= bias_rules.get("zipcode_penalty", 0.0)
+            
+    if "age" in financial_data:
+        try:
+            age = int(financial_data["age"])
+            if age < bias_rules.get("young_age_threshold", 0):
+                composite -= bias_rules.get("young_age_penalty", 0.0)
+        except (ValueError, TypeError):
+            pass
+            
     # Document verification constraint: cap the composite score if docs are missing
     if not docs_verified:
         composite = min(composite, missing_doc_penalty_cap)

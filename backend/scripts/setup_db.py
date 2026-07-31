@@ -92,6 +92,16 @@ DDL_STATEMENTS = [
         timestamp TEXT NOT NULL,
         FOREIGN KEY(application_id) REFERENCES application(id)
     );
+    """,
+    # Trigger to enforce decision before marking application as decided
+    """
+    CREATE TRIGGER IF NOT EXISTS enforce_decision_before_decided
+    BEFORE UPDATE OF status ON application
+    FOR EACH ROW
+    WHEN NEW.status = 'decided' AND NOT EXISTS (SELECT 1 FROM decision WHERE application_id = NEW.id)
+    BEGIN
+        SELECT RAISE(FAIL, 'An application cannot be marked as decided without a corresponding Decision record.');
+    END;
     """
 ]
 
